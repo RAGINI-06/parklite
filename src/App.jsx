@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
@@ -86,6 +87,7 @@ function mapParkingLots(lots) {
       lot.availableSpots ??
       lot.available_spots ??
       lot.availableSpaces ??
+      lot.available_spaces ??
       lot.available ??
       null,
     total: Number(
@@ -110,7 +112,10 @@ function getBookingId(booking) {
 
 function getBookingStatus(booking) {
   return String(
-    booking.status ?? booking.bookingStatus ?? booking.booking_status ?? "BOOKED"
+    booking.status ??
+      booking.bookingStatus ??
+      booking.booking_status ??
+      "BOOKED"
   ).toUpperCase();
 }
 
@@ -158,7 +163,7 @@ function App() {
     password: "",
   });
 
-  // My Bookings page state
+  // My Bookings state
   const [showMyBookings, setShowMyBookings] = useState(false);
   const [myBookings, setMyBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
@@ -177,6 +182,7 @@ function App() {
     end_time: "",
   });
 
+  // Load parking locations when the app opens.
   useEffect(() => {
     let cancelled = false;
 
@@ -252,6 +258,7 @@ function App() {
     }
   }
 
+  // Register or log in.
   async function submitAuth(event) {
     event.preventDefault();
 
@@ -327,7 +334,7 @@ function App() {
     setAuthOpen(false);
   }
 
-  // Open and load My Bookings
+  // Load the current user's bookings.
   async function loadMyBookings() {
     const token = localStorage.getItem("parklite_token");
 
@@ -371,6 +378,28 @@ function App() {
     }
   }
 
+  // Refresh parking locations after a booking change.
+  async function refreshParkingLots() {
+    try {
+      const response = await api.getParkingLots();
+      const lots = mapParkingLots(getLots(response));
+
+      setParkingLocations(lots);
+
+      const query = location.trim().toLowerCase();
+
+      setFiltered(
+        lots.filter((parking) =>
+          `${parking.name} ${parking.location} ${parking.type}`
+            .toLowerCase()
+            .includes(query)
+        )
+      );
+    } catch (error) {
+      console.error("Could not refresh parking locations:", error);
+    }
+  }
+
   async function handleCancelBooking(bookingId) {
     if (bookingId == null) return;
 
@@ -388,24 +417,7 @@ function App() {
 
       await api.cancelBooking(bookingId, token);
       await loadMyBookings();
-
-      // Refresh availability after cancellation.
-      try {
-        const response = await api.getParkingLots();
-        const lots = mapParkingLots(getLots(response));
-        setParkingLocations(lots);
-
-        const query = location.trim().toLowerCase();
-        setFiltered(
-          lots.filter((parking) =>
-            `${parking.name} ${parking.location} ${parking.type}`
-              .toLowerCase()
-              .includes(query)
-          )
-        );
-      } catch (error) {
-        console.error("Could not refresh parking availability:", error);
-      }
+      await refreshParkingLots();
     } catch (error) {
       setBookingsError(
         error.message || "Could not cancel this booking."
@@ -420,6 +432,76 @@ function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  // Check availability for the next hour using the dedicated API endpoint.
+  async function handleCheckAvailability(parking) {
+    const parkingLotId = Number(parking.id);
+
+    if (!Number.isInteger(parkingLotId) || parkingLotId <= 0) {
+      window.alert(
+        "Invalid parking lot ID. Please refresh the parking page."
+      );
+      return;
+    }
+
+    const start = new Date(Date.now() + 5 * 60 * 1000);
+    const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+    try {
+      if (typeof api.checkAvailability !== "function") {
+        throw new Error(
+          "The availability API method is missing. Add checkAvailability() to src/api.js."
+        );
+      }
+
+      const response = await api.checkAvailability(
+        parkingLotId,
+        start.toISOString(),
+        end.toISOString()
+      );
+
+      const payload = getPayload(response);
+      const result =
+        payload?.availability ??
+        payload?.data?.availability ??
+        payload;
+
+      const available =
+        result?.availableSpaces ??
+        result?.available_spaces ??
+        result?.availableSpots ??
+        result?.available_spots ??
+        result?.available;
+
+      if (available == null || Number.isNaN(Number(available))) {
+        console.error("Unexpected availability response:", response);
+        window.alert(
+          "The server responded, but the available-spots count was missing. Check the browser console."
+        );
+        return;
+      }
+
+      window.alert(
+        `${result?.name ?? parking.name}\n\n` +
+          `Available spots: ${available}\n` +
+          `Total capacity: ${
+            result?.totalCapacity ??
+            result?.total_capacity ??
+            parking.total ??
+            "Unknown"
+          }\n` +
+          `Time checked: ${formatDateTime(start)} – ${formatDateTime(end)}`
+      );
+
+      // Refresh the parking list to update the displayed counts.
+      await refreshParkingLots();
+    } catch (error) {
+      window.alert(
+        error.message || "Could not check parking availability."
+      );
+    }
+  }
+
+  // Submit a new parking booking.
   async function submitBooking(event) {
     event.preventDefault();
 
@@ -505,23 +587,7 @@ function App() {
       setBookingResult(booking);
       setBookingSuccess("Your parking booking was created successfully.");
 
-      try {
-        const latest = await api.getParkingLots();
-        const mappedLots = mapParkingLots(getLots(latest));
-
-        setParkingLocations(mappedLots);
-
-        const query = location.trim().toLowerCase();
-        setFiltered(
-          mappedLots.filter((parking) =>
-            `${parking.name} ${parking.location} ${parking.type}`
-              .toLowerCase()
-              .includes(query)
-          )
-        );
-      } catch (error) {
-        console.error("Availability refresh failed:", error);
-      }
+      await refreshParkingLots();
     } catch (error) {
       const message = error.message || "Could not create the booking.";
 
@@ -573,7 +639,9 @@ function App() {
                 <h2>
                   My <span className="yellow">Bookings.</span>
                 </h2>
-                <p>View your reservations and manage your parking plans.</p>
+                <p>
+                  View your reservations and manage your parking plans.
+                </p>
               </div>
 
               <button
@@ -952,6 +1020,7 @@ function App() {
                         parking={parking}
                         index={index}
                         onBook={openBooking}
+                        onCheckAvailability={handleCheckAvailability}
                       />
                     ))}
                   </div>
@@ -1234,7 +1303,8 @@ function App() {
                   }
                 />
 
-                {(bookingResult?.startTime ?? bookingResult?.start_time) && (
+                {(bookingResult?.startTime ??
+                  bookingResult?.start_time) && (
                   <p style={{ fontSize: 13, color: "#697267" }}>
                     Start:{" "}
                     {formatDateTime(
@@ -1243,7 +1313,8 @@ function App() {
                   </p>
                 )}
 
-                {(bookingResult?.endTime ?? bookingResult?.end_time) && (
+                {(bookingResult?.endTime ??
+                  bookingResult?.end_time) && (
                   <p style={{ fontSize: 13, color: "#697267" }}>
                     End:{" "}
                     {formatDateTime(
@@ -1315,7 +1386,6 @@ const primaryStyle = {
 const overlayStyle = {
   position: "fixed",
   inset: 0,
-
   zIndex: 1000,
   background: "rgba(13, 20, 13, 0.62)",
   display: "flex",
@@ -1389,14 +1459,6 @@ const textButtonStyle = {
   color: "#426a25",
   fontWeight: 700,
   cursor: "pointer",
-};
-
-const referenceStyle = {
-  padding: 12,
-  background: "#f4f7ef",
-  borderRadius: 10,
-  fontSize: 14,
-  overflowWrap: "anywhere",
 };
 
 export default App;

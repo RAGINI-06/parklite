@@ -56,6 +56,18 @@ export const api = {
   getParkingLots() {
     return request("/parking-lots");
   },
+  
+checkAvailability(parkingLotId, startTime, endTime) {
+  const params = new URLSearchParams({
+    startTime,
+    endTime,
+  });
+
+  return request(
+    `/parking-lots/${parkingLotId}/availability?${params.toString()}`
+  );
+},
+
 
   register(user) {
     return request("/auth/register", {
@@ -63,6 +75,7 @@ export const api = {
       body: JSON.stringify(user),
     });
   },
+
 
   login(credentials) {
     return request("/auth/login", {
