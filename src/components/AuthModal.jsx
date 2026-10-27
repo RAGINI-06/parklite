@@ -37,11 +37,10 @@ export default function AuthModal({
     cursor: authLoading ? "wait" : "pointer",
     fontSize: "14px",
   };
-
-  const overlayStyle = {
-    position: "fixed",
-    inset: 0,
-    zIndex: 1000,
+const overlayStyle = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 2000,
     background: "rgba(13, 20, 13, 0.62)",
     display: "flex",
     alignItems: "center",
