@@ -12,9 +12,22 @@ const sessionRoutes = require("./routes/session.routes");
 
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://parklite.vercel.app",
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      // Allow requests without an Origin header, such as health checks.
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Origin not allowed by CORS"));
+    },
   })
 );
 
